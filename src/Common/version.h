@@ -1,8 +1,26 @@
 #define EMULATOR_NAME					"Cemu"
 #define EMULATOR_VERSION_LEAD			2
 #define EMULATOR_VERSION_MAJOR			0
-#define EMULATOR_VERSION_MINOR			0 // kept internally for backwards compatibility purposes, but isn't displayed anymore
 
+// the minor version is used for nightly builds to indicate the commit index. Set by command line option from CI build script
+// if zero, the version will be displayed as LEAD.MAJOR, otherwise as LEAD.MAJOR-MINOR
+#ifndef EMULATOR_VERSION_MINOR
+#define EMULATOR_VERSION_MINOR			0		
+#endif
+
+#ifndef EMULATOR_VERSION_SUFFIX
 #define EMULATOR_VERSION_SUFFIX			" (experimental)"
+#endif
 
 #define EMULATOR_SERVER_VERSION			4000 // used for auto-updater, increment this with every release
+
+#define _XSTRINGFY(s) _STRINGFY(s)
+#define _STRINGFY(s) #s
+
+#if EMULATOR_VERSION_MINOR != 0
+#define BUILD_VERSION_WITH_NAME_STRING (EMULATOR_NAME " " _XSTRINGFY(EMULATOR_VERSION_LEAD) "." _XSTRINGFY(EMULATOR_VERSION_MAJOR) "-" _XSTRINGFY(EMULATOR_VERSION_MINOR) EMULATOR_VERSION_SUFFIX)
+#define BUILD_VERSION_STRING (_XSTRINGFY(EMULATOR_VERSION_LEAD) "." _XSTRINGFY(EMULATOR_VERSION_MAJOR) "-" _XSTRINGFY(EMULATOR_VERSION_MINOR) EMULATOR_VERSION_SUFFIX)
+#else
+#define BUILD_VERSION_STRING (_XSTRINGFY(EMULATOR_VERSION_LEAD) "." _XSTRINGFY(EMULATOR_VERSION_MAJOR) EMULATOR_VERSION_SUFFIX)
+#define BUILD_VERSION_WITH_NAME_STRING (EMULATOR_NAME " " _XSTRINGFY(EMULATOR_VERSION_LEAD) "." _XSTRINGFY(EMULATOR_VERSION_MAJOR) EMULATOR_VERSION_SUFFIX)
+#endif
