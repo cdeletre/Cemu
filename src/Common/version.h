@@ -2,14 +2,11 @@
 #define EMULATOR_VERSION_LEAD			2
 #define EMULATOR_VERSION_MAJOR			0
 
-// the minor version is used for nightly builds to indicate the commit index. Set by command line option from CI build script
-// if zero, the version will be displayed as LEAD.MAJOR, otherwise as LEAD.MAJOR-MINOR
+// the minor version is used for experimental builds to indicate the build index. Set by command line option from CI build script
+// if zero, the version text will be constructed as LEAD.MAJOR, otherwise as LEAD.MAJOR-MINOR
 #ifndef EMULATOR_VERSION_MINOR
 #define EMULATOR_VERSION_MINOR			0		
-#endif
-
-#ifndef EMULATOR_VERSION_SUFFIX
-#define EMULATOR_VERSION_SUFFIX			" (experimental)"
+#define EMULATOR_VERSION_SUFFIX			" (dev)"
 #endif
 
 #define EMULATOR_SERVER_VERSION			4000 // used for auto-updater, increment this with every release

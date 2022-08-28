@@ -1,17 +1,15 @@
-name: Create new release
+name: Deploy experimental release
 on: 
   workflow_dispatch:
-    inputs:
-      PlaceholderInput:
-        description: PlaceholderInput
-        required: true
+
 jobs:
   call-release-build:
     uses: ./.github/workflows/build.yml
     with:
       deploymode: release
+      experimentalversion: ${{ github.run_number }}
   deploy:
-    name: Deploy stable release
+    name: Deploy experimental release
     runs-on: ubuntu-20.04
     needs: call-release-build
     steps:
@@ -30,19 +28,17 @@ jobs:
       - name: Initialize
         run: |
           mkdir upload
-          sudo apt update -qq
-          sudo apt install -y zip
+          sudo apt install zip
           
-      - name: Get Cemu release version
+      - name: Get version
         run: |
+          echo "Experimental version: ${{ github.run_number }}"
+          ls
           gcc -o getversion .github/getversion.cpp
+          ./getversion
           echo "Cemu CI version: $(./getversion)"
-          echo "CEMU_FOLDER_NAME=Cemu_$(./getversion)" >> $GITHUB_ENV
-          echo "CEMU_VERSION=$(./getversion)" >> $GITHUB_ENV
-
-      - name: Create appimage
-        run: |
-          echo "to do"
+          echo "CEMU_FOLDER_NAME=Cemu_$(./getversion)-${{ github.run_number }}" >> $GITHUB_ENV
+          echo "CEMU_VERSION=$(./getversion)-${{ github.run_number }}" >> $GITHUB_ENV
 
       - name: Create release from windows-bin
         run: |
@@ -53,7 +49,7 @@ jobs:
           zip -9 -r upload/cemu-${{ env.CEMU_VERSION }}-windows-x64.zip ${{ env.CEMU_FOLDER_NAME }}
           rm -r ./${{ env.CEMU_FOLDER_NAME }}
           
-      - name: Create release from ubuntu-bin
+      - name: Create release from linux-bin
         run: |
           ls ./
           ls ./bin/
@@ -66,4 +62,5 @@ jobs:
         run: |
           wget -O ghr.tar.gz https://github.com/tcnksm/ghr/releases/download/v0.15.0/ghr_v0.15.0_linux_amd64.tar.gz
           tar xvzf ghr.tar.gz; rm ghr.tar.gz
-          ghr_v0.15.0_linux_amd64/ghr -t ${{ secrets.GITHUB_TOKEN }} -n "Cemu ${{ env.CEMU_VERSION }}" -b "Changelog:" v${{ env.CEMU_VERSION }} ./upload
+          echo "[INFO] Release tag: v${{ env.CEMU_VERSION }}"
+          ghr_v0.15.0_linux_amd64/ghr -prerelease -t ${{ secrets.GITHUB_TOKEN }} -n "Cemu ${{ env.CEMU_VERSION }} (Experimental)" -b "Changelog is currently not available for experimental releases" "v${{ env.CEMU_VERSION }}" ./upload
