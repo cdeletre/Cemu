@@ -23,12 +23,16 @@ bin/Cemu
 bin/otp.bin
 bin/seeprom.bin
 bin/Cemu.pdb
+bin/Cemu.ilk
 bin/mlc01/*
 bin/settings.xml
+bin/log.txt
 bin/title_list_cache.xml
 
 !bin/shaderCache/info.txt
 bin/shaderCache/*
+
+bin/graphicPacks/*
 
 bin/controllerProfiles/*
 
