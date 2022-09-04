@@ -78,7 +78,7 @@ set_target_properties(CemuBin PROPERTIES
 	# multi-configuration generators will add a config subdirectory to RUNTIME_OUTPUT_DIRECTORY if no generator expression is used
 	# we workaround this by adding an empty generator expression
 	RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../bin/$<1:>"
-	OUTPUT_NAME "Cemu_$<CONFIG>"
+	OUTPUT_NAME "Cemu_$<LOWER_CASE:$<CONFIG>>"
 )
 
 target_link_libraries(CemuBin PRIVATE
