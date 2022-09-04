@@ -86,13 +86,17 @@ jobs:
       run: |
         cd build
         ninja
-        
+
+    - name: Prepare artifact
+      if: ${{ inputs.deploymode == 'release' }}
+      run: mv bin/Cemu_release bin/Cemu
+              
     - name: Upload artifact
       uses: actions/upload-artifact@v3
       if: ${{ inputs.deploymode == 'release' }}
       with:
         name: cemu-bin-linux-x64
-        path: ./bin/Cemu_release
+        path: ./bin/Cemu
         
         
   build-windows:
@@ -188,10 +192,14 @@ jobs:
       run: |
         cd build
         cmake --build . --config ${{ env.BUILD_MODE }} -j 2
-        
+
+    - name: Prepare artifact
+      if: ${{ inputs.deploymode == 'release' }}
+      run: Rename-Item -Path "bin/Cemu_release.exe" -NewName "bin/Cemu.exe"
+      
     - name: Upload artifact
       uses: actions/upload-artifact@v3
       if: ${{ inputs.deploymode == 'release' }}
       with:
         name: cemu-bin-windows-x64
-        path: ./bin/Cemu_Release.exe
+        path: ./bin/Cemu.exe
