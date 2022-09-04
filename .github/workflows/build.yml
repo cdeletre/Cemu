@@ -195,7 +195,7 @@ jobs:
 
     - name: Prepare artifact
       if: ${{ inputs.deploymode == 'release' }}
-      run: Rename-Item -Path "bin/Cemu_release.exe" -NewName "bin/Cemu.exe"
+      run: Rename-Item bin/Cemu_release.exe Cemu.exe
       
     - name: Upload artifact
       uses: actions/upload-artifact@v3
