@@ -92,7 +92,7 @@ jobs:
       if: ${{ inputs.deploymode == 'release' }}
       with:
         name: cemu-bin-linux-x64
-        path: ./bin/Cemu_Release
+        path: ./bin/Cemu_release
         
         
   build-windows:
