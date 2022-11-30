@@ -118,7 +118,7 @@ jobs:
       uses: ilammy/msvc-dev-cmd@v1
       with:
         arch: amd64
-        toolset: 14.33.31629
+        toolset: 14.XX
         spectre: false
 
     - name: "Bootstrap vcpkg"
