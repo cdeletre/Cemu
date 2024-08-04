@@ -2185,6 +2185,30 @@ void _emitTEXSampleCoordInputComponent(LatteDecompilerShaderContext* shaderConte
 	}
 }
 
+const char* s_glslVectorCastTableFloat[4] = {"float(", "vec2(","vec3(","vec4("};
+const char* s_glslVectorCastTableInt[4] = {"int(", "ivec2(","ivec3(","ivec4("};
+const char* s_glslVectorCastTableUInt[4] = {"uint(", "uvec2(","uvec3(","uvec4("};
+const char** s_glslVectorCastTable[4] = {nullptr, s_glslVectorCastTableUInt, s_glslVectorCastTableInt, s_glslVectorCastTableFloat};
+static_assert(LATTE_DECOMPILER_DTYPE_FLOAT == 3);
+static_assert(LATTE_DECOMPILER_DTYPE_SIGNED_INT == 2);
+static_assert(LATTE_DECOMPILER_DTYPE_UNSIGNED_INT == 1);
+
+template<int... TIndex> // create vec from srcSel components
+void _emitTexSrcSel(LatteDecompilerShaderContext* shaderContext, LatteDecompilerTEXInstruction* texInstruction, int interpretSrcAsType = LATTE_DECOMPILER_DTYPE_FLOAT)
+{
+	StringBuf* src = shaderContext->shaderSource;
+	constexpr size_t count = sizeof...(TIndex);
+	static_assert(count > 0 && count <= 4);
+	src->add(s_glslVectorCastTable[interpretSrcAsType][count-1]);
+	auto AddCoord = [&](sint32 index)
+	{
+		_emitTEXSampleCoordInputComponent(shaderContext, texInstruction, index, interpretSrcAsType);
+		src->add(",");
+	};
+	(AddCoord(TIndex), ...);
+	src->replaceLastChar(')'); // replace trailing comma with closing parenthesis
+}
+
 const char* _texGprAccessElemTable[8] = {"x","y","z","w","_","_","_","_"};
 
 char* _getTexGPRAccess(LatteDecompilerShaderContext* shaderContext, sint32 gprIndex, uint32 dataType, sint8 selX, sint8 selY, sint8 selZ, sint8 selW, char* tempBuffer)
@@ -2261,7 +2285,6 @@ void _emitTEXSampleTextureCode(LatteDecompilerShaderContext* shaderContext, Latt
 	auto texDim = shaderContext->shader->textureUnitDim[texInstruction->textureFetch.textureIndex];
 
 	char tempBuffer0[32];
-	char tempBuffer1[32];
 	src->add(_getRegisterVarName(shaderContext, texInstruction->dstGpr));
 	src->add(".");
 	const char* resultElemTable[4] = {"x","y","z","w"};
@@ -2334,15 +2357,34 @@ void _emitTEXSampleTextureCode(LatteDecompilerShaderContext* shaderContext, Latt
 		return;
 	}
 
+	// determine which parameters we need:
+	const bool isShadowSample = (texOpcode == GPU7_TEX_INST_SAMPLE_C || texOpcode == GPU7_TEX_INST_SAMPLE_C_L || texOpcode == GPU7_TEX_INST_SAMPLE_C_LZ);
+	const bool hasGradientParam = texOpcode == GPU7_TEX_INST_SAMPLE_G;
+	bool hasLODParam = (texOpcode == GPU7_TEX_INST_SAMPLE_L || texOpcode == GPU7_TEX_INST_SAMPLE_C_L);
+	bool hasZeroLODParam = (texOpcode == GPU7_TEX_INST_SAMPLE_LZ || texOpcode == GPU7_TEX_INST_SAMPLE_C_LZ);
+	bool hasLODBiasParam = (texOpcode == GPU7_TEX_INST_SAMPLE_LB);
+
+	//bool texCoordIsUnnormalized = texInstruction->textureFetch.unnormalized[0] && texInstruction->textureFetch.unnormalized[1] && texInstruction->textureFetch.unnormalized[2] && texInstruction->textureFetch.unnormalized[3];
 
 	if (texOpcode == GPU7_TEX_INST_SAMPLE && (texInstruction->textureFetch.unnormalized[0] && texInstruction->textureFetch.unnormalized[1] && texInstruction->textureFetch.unnormalized[2] && texInstruction->textureFetch.unnormalized[3]) )
 	{
-		// texture is likely a RECT
+		cemu_assert_debug(false); // todo - This should be using the regular texture() function (reuse GPU7_TEX_INST_SAMPLE code path below) and instead unnormalized coordinates by multiplying with textureSize() and scale uf
+		// texture is likely using a RECT sampler
 		if (hasOffset)
 			cemu_assert_unimplemented();
+
 		src->add("texelFetch(");
 		unnormalizationHandled = true;
 		useTexelCoordinates = true;
+		cemu_assert_debug(hasOffset); //
+		hasOffset = false;
+	}
+	else if (texOpcode == GPU7_TEX_INST_SAMPLE)
+	{
+		if (hasOffset)
+			src->add("textureOffset(");
+		else
+			src->add("texture(");
 	}
 	else if( texOpcode == GPU7_TEX_INST_FETCH4 )
 	{
@@ -2352,11 +2394,11 @@ void _emitTEXSampleTextureCode(LatteDecompilerShaderContext* shaderContext, Latt
 	}
 	else if( texOpcode == GPU7_TEX_INST_LD )
 	{
-		if( hasOffset )
-			cemu_assert_unimplemented();
+		cemu_assert_debug(!hasOffset);
 		src->add("texelFetch(");
 		unnormalizationHandled = true;
 		useTexelCoordinates = true;
+		hasOffset = 0; // texelFetch doesn't support an offset parameter, but we could add it to the coordinates
 	}
 	else if( texOpcode == GPU7_TEX_INST_SAMPLE_L )
 	{
@@ -2378,13 +2420,6 @@ void _emitTEXSampleTextureCode(LatteDecompilerShaderContext* shaderContext, Latt
 	{
 		// sample with LOD biased
 		// note: AMD doc says LOD bias is calculated from instruction LOD_BIAS field. But it appears that LOD bias is taken from input register. Might actually be both?
-		if (hasOffset)
-			src->add("textureOffset(");
-		else
-			src->add("texture(");
-	}
-	else if (texOpcode == GPU7_TEX_INST_SAMPLE)
-	{
 		if (hasOffset)
 			src->add("textureOffset(");
 		else
@@ -2426,210 +2461,179 @@ void _emitTEXSampleTextureCode(LatteDecompilerShaderContext* shaderContext, Latt
 		cemu_assert_unimplemented();
 		src->add("texture(");
 	}
+	// sampler name
 	src->addFmt("{}{}, ", _getTextureUnitVariablePrefixName(shaderContext->shader->shaderType), texInstruction->textureFetch.textureIndex);
 
-	// for textureGather() add shift (todo: depends on rounding mode set in sampler registers?)
-	if (texOpcode == GPU7_TEX_INST_FETCH4)
+	// texture coordinates
 	{
-		if (texDim == Latte::E_DIM::DIM_2D)
+		// for textureGather() add shift (todo: depends on rounding mode set in sampler registers?)
+		if (texOpcode == GPU7_TEX_INST_FETCH4)
 		{
-			//src->addFmt2("(vec2(-0.1) / vec2(textureSize({}{},0).xy)) + ", gpu7Decompiler_getTextureUnitVariablePrefixName(shaderContext->shader->shaderType), texInstruction->textureIndex);
-			
-			// vec2(-0.00001) is minimum to break Nvidia
-			// vec2(0.0001) is minimum to fix shadows on Intel, also fixes it on AMD (Windows and Linux)
-
-			// todo - emulating coordinate rounding mode correctly is tricky
-			// GX2 supports two modes: Truncate or rounding according to DX9 rules
-			// Vulkan uses truncate mode when point sampling (min and mag is both nearest) otherwise it uses rounding
-			
-			// adding a small fixed bias is enough to avoid vendor-specific cases where small inaccuracies cause the number to get rounded down due to truncation
-			src->addFmt("vec2(0.0001) + ");
-		}
-	}
-
-	const sint32 texCoordDataType = (texOpcode == GPU7_TEX_INST_LD) ? LATTE_DECOMPILER_DTYPE_SIGNED_INT : LATTE_DECOMPILER_DTYPE_FLOAT;
-	if(useTexelCoordinates)
-	{
-		// handle integer coordinates for texelFetch
-		if (texDim == Latte::E_DIM::DIM_2D || texDim == Latte::E_DIM::DIM_2D_MSAA)
-		{
-			src->add("ivec2(");
-			src->add("vec2(");
-			_emitTEXSampleCoordInputComponent(shaderContext, texInstruction, 0, texCoordDataType);
-			src->addFmt(", ");
-			_emitTEXSampleCoordInputComponent(shaderContext, texInstruction, 1, texCoordDataType);
-
-			src->addFmt(")*uf_tex{}Scale", texInstruction->textureFetch.textureIndex); // close vec2 and scale
-
-			src->add("), 0"); // close ivec2 and lod param
-			// todo - lod
-		}
-		else if (texDim == Latte::E_DIM::DIM_1D)
-		{
-			// VC DS games forget to initialize textures and use texel fetch on an uninitialized texture (a dim of 0 maps to 1D)
-			src->add("int(");
-			src->add("float(");
-			_emitTEXSampleCoordInputComponent(shaderContext, texInstruction, 0, (texOpcode == GPU7_TEX_INST_LD) ? LATTE_DECOMPILER_DTYPE_SIGNED_INT : LATTE_DECOMPILER_DTYPE_FLOAT);
-			src->addFmt(")*uf_tex{}Scale.x", texInstruction->textureFetch.textureIndex);
-			src->add("), 0");
-			// todo - lod
-		}
-		else
-			cemu_assert_debug(false);
-	}
-	else /* useTexelCoordinates == false */
-	{
-		// float coordinates
-		if ( (texOpcode == GPU7_TEX_INST_SAMPLE_C || texOpcode == GPU7_TEX_INST_SAMPLE_C_L || texOpcode == GPU7_TEX_INST_SAMPLE_C_LZ) )
-		{
-			// shadow sampler
-			if (texDim == Latte::E_DIM::DIM_2D_ARRAY)
+			if (texDim == Latte::E_DIM::DIM_2D)
 			{
-				// 3 coords + compare value (as vec4)
-				src->add("vec4(");
-				_emitTEXSampleCoordInputComponent(shaderContext, texInstruction, 0, LATTE_DECOMPILER_DTYPE_FLOAT);
-				src->add(",");
-				_emitTEXSampleCoordInputComponent(shaderContext, texInstruction, 1, LATTE_DECOMPILER_DTYPE_FLOAT);
-				src->add(",");
-				_emitTEXSampleCoordInputComponent(shaderContext, texInstruction, 2, LATTE_DECOMPILER_DTYPE_FLOAT);
+				//src->addFmt2("(vec2(-0.1) / vec2(textureSize({}{},0).xy)) + ", gpu7Decompiler_getTextureUnitVariablePrefixName(shaderContext->shader->shaderType), texInstruction->textureIndex);
 
-				src->addFmt(",{})", _getTexGPRAccess(shaderContext, texInstruction->srcGpr, LATTE_DECOMPILER_DTYPE_FLOAT, texInstruction->textureFetch.srcSel[3], -1, -1, -1, tempBuffer0));
+				// vec2(-0.00001) is minimum to break Nvidia
+				// vec2(0.0001) is minimum to fix shadows on Intel, also fixes it on AMD (Windows and Linux)
+
+				// todo - emulating coordinate rounding mode correctly is tricky
+				// GX2 supports two modes: Truncate or rounding according to DX9 rules
+				// Vulkan uses truncate mode when point sampling (min and mag is both nearest) otherwise it uses rounding
+
+				// adding a small fixed bias is enough to avoid vendor-specific cases where small inaccuracies cause the number to get rounded down due to truncation
+				src->addFmt("vec2(0.0001) + ");
 			}
-			else if (texDim == Latte::E_DIM::DIM_CUBEMAP)
+		}
+		if(useTexelCoordinates)
+		{
+			const sint32 texCoordDataType = (texOpcode == GPU7_TEX_INST_LD) ? LATTE_DECOMPILER_DTYPE_SIGNED_INT : LATTE_DECOMPILER_DTYPE_FLOAT;
+			cemu_assert_debug(!isShadowSample);
+			// handle integer coordinates for texelFetch
+			if (texDim == Latte::E_DIM::DIM_2D || texDim == Latte::E_DIM::DIM_2D_MSAA)
 			{
-				// 2 coords + faceId
-				if (texInstruction->textureFetch.srcSel[0] >= 4 || texInstruction->textureFetch.srcSel[1] >= 4)
-				{
-					debugBreakpoint();
-				}
-				src->add("vec4(");
-				src->addFmt("redcCUBEReverse({},", _getTexGPRAccess(shaderContext, texInstruction->srcGpr, LATTE_DECOMPILER_DTYPE_FLOAT, texInstruction->textureFetch.srcSel[0], texInstruction->textureFetch.srcSel[1], -1, -1, tempBuffer0));
-				_emitTEXSampleCoordInputComponent(shaderContext, texInstruction, 2, LATTE_DECOMPILER_DTYPE_SIGNED_INT);
-				src->addFmt(")");
-				src->addFmt(",cubeMapArrayIndex{})", texInstruction->textureFetch.textureIndex); // cubemap index
+				src->add("ivec2(vec2(");
+				_emitTexSrcSel<0, 1>(shaderContext, texInstruction, texCoordDataType);
+				src->addFmt(")*uf_tex{}Scale", texInstruction->textureFetch.textureIndex); // close vec2 and scale
+				src->add("), 0"); // close ivec2 and lod param
+				// todo - lod
 			}
 			else if (texDim == Latte::E_DIM::DIM_1D)
 			{
-				// 1 coord + 1 unused coord (per GLSL spec) + compare value
-				if (texInstruction->textureFetch.srcSel[0] >= 4)
+				// VC DS games forget to initialize textures and use texel fetch on an uninitialized texture (a dim of 0 maps to 1D)
+				src->add("int(float(");
+				_emitTexSrcSel<0>(shaderContext, texInstruction, texCoordDataType);
+				src->addFmt(")*uf_tex{}Scale.x", texInstruction->textureFetch.textureIndex);
+				src->add("), 0");
+				// todo - lod
+			}
+			else
+				cemu_assert_debug(false);
+		}
+		else /* useTexelCoordinates == false */
+		{
+			// float coordinates
+			if ( isShadowSample )
+			{
+				// shadow sampler
+				if (texDim == Latte::E_DIM::DIM_2D_ARRAY)
 				{
-					debugBreakpoint();
+					// 3 coords + compare value (as vec4)
+					_emitTexSrcSel<0, 1, 2, 3>(shaderContext, texInstruction);
 				}
-				src->addFmt("vec3({},0.0,{})", _getTexGPRAccess(shaderContext, texInstruction->srcGpr, LATTE_DECOMPILER_DTYPE_FLOAT, texInstruction->textureFetch.srcSel[0], -1, -1, -1, tempBuffer0), _getTexGPRAccess(shaderContext, texInstruction->srcGpr, LATTE_DECOMPILER_DTYPE_FLOAT, texInstruction->textureFetch.srcSel[3], -1, -1, -1, tempBuffer1));
+				else if (texDim == Latte::E_DIM::DIM_CUBEMAP)
+				{
+					// cubemap coord for this instruction consists of:
+					// 2 values + integer faceId (stored in srcSel 0-2)
+					// shadow compare value is stored in srcSel[3]
+					src->add("vec4(");
+					src->add("redcCUBEReverse(");
+					_emitTexSrcSel<0, 1>(shaderContext, texInstruction);
+					src->add(",");
+					_emitTexSrcSel<2>(shaderContext, texInstruction, LATTE_DECOMPILER_DTYPE_SIGNED_INT);
+					src->addFmt("),cubeMapArrayIndex{}),", texInstruction->textureFetch.textureIndex); // cubemap index
+					_emitTexSrcSel<3>(shaderContext, texInstruction); // compare value
+				}
+				else if (texDim == Latte::E_DIM::DIM_1D)
+				{
+					// 1 coord + 1 unused coord (per GLSL spec) + compare value
+					src->add("vec3(");
+					_emitTexSrcSel<0>(shaderContext, texInstruction);
+					src->add(", 0.0, ");
+					_emitTexSrcSel<3>(shaderContext, texInstruction);
+					src->add(")");
+				}
+				else
+				{
+					// 2 coords + compare value (as vec3)
+					_emitTexSrcSel<0, 1, 3>(shaderContext, texInstruction);
+				}
+			}
+			else if( texDim == Latte::E_DIM::DIM_3D || texDim == Latte::E_DIM::DIM_2D_ARRAY )
+			{
+				// 3 component coord
+				_emitTexSrcSel<0, 1, 2>(shaderContext, texInstruction);
+			}
+			else if( texDim == Latte::E_DIM::DIM_CUBEMAP )
+			{
+				// 2 coords + faceId
+				src->add("vec4(");
+				src->add("redcCUBEReverse(");
+				_emitTexSrcSel<0, 1>(shaderContext, texInstruction);
+				src->add(",");
+				_emitTexSrcSel<2>(shaderContext, texInstruction, LATTE_DECOMPILER_DTYPE_SIGNED_INT);
+				src->addFmt("),cubeMapArrayIndex{})", texInstruction->textureFetch.textureIndex); // cubemap index
+			}
+			else if( texDim == Latte::E_DIM::DIM_1D )
+			{
+				// 1 coord
+				_emitTexSrcSel<0>(shaderContext, texInstruction);
 			}
 			else
 			{
-				// 2 coords + compare value (as vec3)
-				if (texInstruction->textureFetch.srcSel[0] >= 4 && texInstruction->textureFetch.srcSel[1] >= 4)
-				{
-					debugBreakpoint();
-				}
-				src->addFmt("vec3({}, {})", _getTexGPRAccess(shaderContext, texInstruction->srcGpr, LATTE_DECOMPILER_DTYPE_FLOAT, texInstruction->textureFetch.srcSel[0], texInstruction->textureFetch.srcSel[1], -1, -1, tempBuffer0), _getTexGPRAccess(shaderContext, texInstruction->srcGpr, LATTE_DECOMPILER_DTYPE_FLOAT, texInstruction->textureFetch.srcSel[3], -1, -1, -1, tempBuffer1));
+				// 2 coords
+				_emitTexSrcSel<0, 1>(shaderContext, texInstruction);
+				// add a small bias to avoid cases where truncate causes downwards rounding on texel edges
+				if (ActiveSettings::ForceSamplerRoundToPrecision())
+					src->addFmt("+ vec2(1.0)/vec2(textureSize({}{}, 0))/512.0", _getTextureUnitVariablePrefixName(shaderContext->shader->shaderType), texInstruction->textureFetch.textureIndex);
 			}
-		}
-		else if( texDim == Latte::E_DIM::DIM_3D || texDim == Latte::E_DIM::DIM_2D_ARRAY )
-		{
-			// 3 coords
-			src->add("vec3(");
-			_emitTEXSampleCoordInputComponent(shaderContext, texInstruction, 0, LATTE_DECOMPILER_DTYPE_FLOAT);
-			src->add(",");
-			_emitTEXSampleCoordInputComponent(shaderContext, texInstruction, 1, LATTE_DECOMPILER_DTYPE_FLOAT);
-			src->add(",");
-			_emitTEXSampleCoordInputComponent(shaderContext, texInstruction, 2, LATTE_DECOMPILER_DTYPE_FLOAT);
-			src->add(")");
-		}
-		else if( texDim == Latte::E_DIM::DIM_CUBEMAP )
-		{
-			// 2 coords + faceId
-			cemu_assert_debug(texInstruction->textureFetch.srcSel[0] < 4);
-			cemu_assert_debug(texInstruction->textureFetch.srcSel[1] < 4);
-			src->add("vec4(");
-			src->addFmt("redcCUBEReverse({},", _getTexGPRAccess(shaderContext, texInstruction->srcGpr, LATTE_DECOMPILER_DTYPE_FLOAT, texInstruction->textureFetch.srcSel[0], texInstruction->textureFetch.srcSel[1], -1, -1, tempBuffer0));
-			_emitTEXSampleCoordInputComponent(shaderContext, texInstruction, 2, LATTE_DECOMPILER_DTYPE_SIGNED_INT);
-			src->add(")");
-			src->addFmt(",cubeMapArrayIndex{})", texInstruction->textureFetch.textureIndex); // cubemap index
-		}
-		else if( texDim == Latte::E_DIM::DIM_1D )
-		{
-			// 1 coord
-			src->add(_getTexGPRAccess(shaderContext, texInstruction->srcGpr, LATTE_DECOMPILER_DTYPE_FLOAT, texInstruction->textureFetch.srcSel[0], -1, -1, -1, tempBuffer0));
-		}
-		else
-		{
-			// 2 coords
-			src->add("vec2(");
-			_emitTEXSampleCoordInputComponent(shaderContext, texInstruction, 0, LATTE_DECOMPILER_DTYPE_FLOAT);
-			src->add(",");
-			_emitTEXSampleCoordInputComponent(shaderContext, texInstruction, 1, LATTE_DECOMPILER_DTYPE_FLOAT);
-			src->add(")");
-			// avoid truncate to effectively round downwards on texel edges
-			if (ActiveSettings::ForceSamplerRoundToPrecision())
-				src->addFmt("+ vec2(1.0)/vec2(textureSize({}{}, 0))/512.0", _getTextureUnitVariablePrefixName(shaderContext->shader->shaderType), texInstruction->textureFetch.textureIndex);
-		}
-		// lod or lod bias parameter
-		if( texOpcode == GPU7_TEX_INST_SAMPLE_L || texOpcode == GPU7_TEX_INST_SAMPLE_LB || texOpcode == GPU7_TEX_INST_SAMPLE_C_L)
-		{
-			src->add(",");
-			if(texOpcode == GPU7_TEX_INST_SAMPLE_LB)
-				src->add(_FormatFloatAsGLSLConstant((float)texInstruction->textureFetch.lodBias / 16.0f));
-			else
-				_emitTEXSampleCoordInputComponent(shaderContext, texInstruction, 3, LATTE_DECOMPILER_DTYPE_FLOAT);
-		}
-		else if( texOpcode == GPU7_TEX_INST_SAMPLE_LZ || texOpcode == GPU7_TEX_INST_SAMPLE_C_LZ )
-		{
-			src->add(",0.0");
 		}
 	}
 	// gradient parameters
-	if (texOpcode == GPU7_TEX_INST_SAMPLE_G)
+	if (hasGradientParam)
 	{
-		if (texDim == Latte::E_DIM::DIM_2D ||
-			texDim == Latte::E_DIM::DIM_1D )
-		{
-			src->add(",gradH.xy,gradV.xy");
-		}
-		else	
-		{
-			cemu_assert_unimplemented();
-		}
+		cemu_assert_debug(texDim == Latte::E_DIM::DIM_1D || texDim == Latte::E_DIM::DIM_2D); // how to handle other dimensions?
+		src->add(",gradH.xy,gradV.xy");
+	}
+	// lod
+	if(hasLODParam)
+	{
+		src->add(",");
+		cemu_assert_debug(!isShadowSample); // how is LOD and shadow compare value handled?
+		_emitTexSrcSel<3>(shaderContext, texInstruction);
+	}
+	else if(hasZeroLODParam)
+	{
+		src->add(",0.0");
 	}
 	// offset
-	if( texOpcode == GPU7_TEX_INST_SAMPLE_L || texOpcode == GPU7_TEX_INST_SAMPLE_LZ || texOpcode == GPU7_TEX_INST_SAMPLE_C_LZ || texOpcode == GPU7_TEX_INST_SAMPLE || texOpcode == GPU7_TEX_INST_SAMPLE_C )
+	if( hasOffset )
 	{
-		if( hasOffset )
-		{
-			uint8 offsetComponentCount = 0;
-			if( texDim == Latte::E_DIM::DIM_1D )
-				offsetComponentCount = 1;
-			else if( texDim == Latte::E_DIM::DIM_2D )
-				offsetComponentCount = 2;
-			else if( texDim == Latte::E_DIM::DIM_3D )
-				offsetComponentCount = 3;
-			else if( texDim == Latte::E_DIM::DIM_2D_ARRAY )
-				offsetComponentCount = 2;
-			else
-				cemu_assert_unimplemented();
+		uint8 offsetComponentCount = 0;
+		if( texDim == Latte::E_DIM::DIM_1D )
+			offsetComponentCount = 1;
+		else if( texDim == Latte::E_DIM::DIM_2D )
+			offsetComponentCount = 2;
+		else if( texDim == Latte::E_DIM::DIM_3D )
+			offsetComponentCount = 3;
+		else if( texDim == Latte::E_DIM::DIM_2D_ARRAY )
+			offsetComponentCount = 2;
+		else
+			cemu_assert_unimplemented();
 
-			if( (texInstruction->textureFetch.offsetX&1) )
-				cemu_assert_unimplemented();
-			if( (texInstruction->textureFetch.offsetY&1) )
-				cemu_assert_unimplemented();
-			if ((texInstruction->textureFetch.offsetZ & 1))
-				cemu_assert_unimplemented();
+		if( (texInstruction->textureFetch.offsetX&1) )
+			cemu_assert_unimplemented();
+		if( (texInstruction->textureFetch.offsetY&1) )
+			cemu_assert_unimplemented();
+		if ( (texInstruction->textureFetch.offsetZ&1) )
+			cemu_assert_unimplemented();
 
-			if( offsetComponentCount == 1 )
-				src->addFmt(",{}", texInstruction->textureFetch.offsetX/2);
-			else if( offsetComponentCount == 2 )
-				src->addFmt(",ivec2({},{})", texInstruction->textureFetch.offsetX/2, texInstruction->textureFetch.offsetY/2, texInstruction->textureFetch.offsetZ/2);
-			else if( offsetComponentCount == 3 )
-				src->addFmt(",ivec3({},{},{})", texInstruction->textureFetch.offsetX/2, texInstruction->textureFetch.offsetY/2, texInstruction->textureFetch.offsetZ/2);
-		}
+		if( offsetComponentCount == 1 )
+			src->addFmt(",{}", texInstruction->textureFetch.offsetX/2);
+		else if( offsetComponentCount == 2 )
+			src->addFmt(",ivec2({},{})", texInstruction->textureFetch.offsetX/2, texInstruction->textureFetch.offsetY/2, texInstruction->textureFetch.offsetZ/2);
+		else if( offsetComponentCount == 3 )
+			src->addFmt(",ivec3({},{},{})", texInstruction->textureFetch.offsetX/2, texInstruction->textureFetch.offsetY/2, texInstruction->textureFetch.offsetZ/2);
 	}
 	// lod bias
+	if(hasLODBiasParam)
+	{
+		src->add(",");
+		src->add(_FormatFloatAsGLSLConstant((float)texInstruction->textureFetch.lodBias / 16.0f));
+	}
+	// extract result components
 	if( texOpcode == GPU7_TEX_INST_SAMPLE_C || texOpcode == GPU7_TEX_INST_SAMPLE_C_LZ )
 	{
 		src->add(")");
-
 		if (numWrittenElements > 1)
 		{
 			// result is copied into multiple channels
@@ -2656,7 +2660,7 @@ void _emitTEXSampleTextureCode(LatteDecompilerShaderContext* shaderContext, Latt
 					// textureGather	xyzw
 					// fetch4			yzxw
 					// translate index from fetch4 to textureGather order
-					static uint8 fetchToGather[4] =
+					static constexpr uint8 fetchToGather[4] =
 					{
 						2, // x -> z
 						0, // y -> x
@@ -4042,7 +4046,7 @@ void LatteDecompiler_emitGLSLShader(LatteDecompilerShaderContext* shaderContext,
 			src->addFmt("bool activeMaskStackCSub{:04x}[{}];" _CRLF, subroutineInfo.cfAddr, subroutineMaxStackDepth + 2);
 		}
 	}
-	// helper variables for cube maps (todo: Only emit when used)
+	// helper variables for cube maps
 	if (shaderContext->analyzer.hasRedcCUBE)
 	{
 		src->add("vec3 cubeMapSTM;" _CRLF);

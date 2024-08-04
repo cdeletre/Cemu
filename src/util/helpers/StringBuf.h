@@ -54,6 +54,12 @@ public:
 		outputStart[copyLen] = '\0';
 	}
 
+	void replaceLastChar(char newChar)
+	{
+		if (length > 0)
+			str[length - 1] = newChar;
+	}
+
 	void reset()
 	{
 		length = 0;
