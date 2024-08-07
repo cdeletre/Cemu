@@ -19,10 +19,12 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
-            const { data: latestRelease } = await github.rest.repos.getLatestRelease({
+            const { data: releases } = await github.rest.repos.listReleases({
               owner: context.repo.owner,
               repo: context.repo.repo,
             });
+
+            const latestRelease = releases[0];
 
             const { data: commits } = await github.rest.repos.listCommits({
               owner: context.repo.owner,
@@ -30,8 +32,8 @@ jobs:
               since: latestRelease.published_at,
             });
 
-            const commitMessages = commits.map(commit => `- ${commit.commit.message}`).join('\n');
-            return commitMessages;
+            const commitTitles = commits.map(commit => `- ${commit.commit.message.split('\n')[0]}`).join('\n');
+            return commitTitles;
           result-encoding: string
  
       - uses: actions/download-artifact@v4
