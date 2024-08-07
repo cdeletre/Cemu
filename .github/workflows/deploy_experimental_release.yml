@@ -19,17 +19,17 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
-            const { data: releases } = await github.rest.repos.listReleases({
+            const releases = await github.rest.repos.listReleases({
               owner: context.repo.owner,
               repo: context.repo.repo,
             });
 
-            if (!releases.length) {
+            if (!releases.data.length) {
               console.log("No releases found.");
               return "No previous release found.";
             }
 
-            const latestRelease = releases[0];
+            const latestRelease = releases.data[0];
             console.log(`Latest release found: ${latestRelease.tag_name} published at ${latestRelease.published_at}`);
 
             const { data: commits } = await github.rest.repos.listCommits({
