@@ -6,7 +6,6 @@ jobs:
   call-release-build:
     uses: ./.github/workflows/build.yml
     with:
-      deploymode: release
       experimentalversion: ${{ github.run_number }}
   deploy:
     name: Deploy experimental release
