@@ -1,0 +1,10 @@
+template: |
+  ### Changelog
+  
+  - Entry 1
+  - Entry 2
+  
+  
+  ### Merged Pull Requests in this release
+  
+  $CHANGES
