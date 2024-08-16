@@ -17,5 +17,4 @@ jobs:
   build:
     uses: ./.github/workflows/build.yml
     with:
-      deploymode: release
       experimentalversion: 999999

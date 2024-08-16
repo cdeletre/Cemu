@@ -1,12 +1,16 @@
 name: Deploy experimental release
 on: 
   workflow_dispatch:
+    inputs:
+      changelog:
+        description: 'Enter the changelog for this release'
+        required: true
+        type: string
 
 jobs:
   call-release-build:
     uses: ./.github/workflows/build.yml
     with:
-      deploymode: release
       experimentalversion: ${{ github.run_number }}
   deploy:
     name: Deploy experimental release
@@ -14,6 +18,40 @@ jobs:
     needs: call-release-build
     steps:
       - uses: actions/checkout@v3
+ 
+      - name: Use GitVersion to generate version
+        id: gitversion
+        uses: gittools/actions/gitversion/setup@v3.0.0
+        with:
+          useConfigFile: false
+ 
+      - name: Get commit messages since last release
+        id: get_commits
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const releases = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+
+            if (!releases.data.length) {
+              console.log("No releases found.");
+              return "No previous release found.";
+            }
+
+            const latestRelease = releases.data[0];
+            console.log(`Latest release found: ${latestRelease.tag_name} published at ${latestRelease.published_at}`);
+
+            const { data: commits } = await github.rest.repos.listCommits({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              since: latestRelease.published_at,
+            });
+
+            const commitTitles = commits.map(commit => `- ${commit.commit.message.split('\n')[0]}`).join('\n');
+            return commitTitles;
+          result-encoding: string
  
       - uses: actions/download-artifact@v4
         with:
@@ -39,6 +77,13 @@ jobs:
         run: |
           mkdir upload
           sudo apt install zip
+          
+      - name: Get version (via gitversion)
+        run: |
+          echo "Version from GitVersion: ${{ steps.gitversion.outputs.fullsemver }}"
+          echo "Version from GitVersion (Major.Minor): ${{ steps.gitversion.outputs.Major }}.${{ steps.gitversion.outputs.Minor }}"
+          echo "CEMU_FOLDER_NAME=Cemu_${{ steps.gitversion.outputs.fullsemver }}" >> $GITHUB_ENV
+          echo "CEMU_VERSION=${{ steps.gitversion.outputs.fullsemver }}" >> $GITHUB_ENV
           
       - name: Get version
         run: |
@@ -83,4 +128,10 @@ jobs:
           wget -O ghr.tar.gz https://github.com/tcnksm/ghr/releases/download/v0.15.0/ghr_v0.15.0_linux_amd64.tar.gz
           tar xvzf ghr.tar.gz; rm ghr.tar.gz
           echo "[INFO] Release tag: v${{ env.CEMU_VERSION }}"
-          ghr_v0.15.0_linux_amd64/ghr -prerelease -t ${{ secrets.GITHUB_TOKEN }} -n "Cemu ${{ env.CEMU_VERSION }} (Experimental)" -b "Cemu experimental release" "v${{ env.CEMU_VERSION }}" ./upload
+          RELEASE_BODY=$(printf "%s\n%s\n\n%s\n\n%s\n%s" \
+            "Cemu ${{ env.CEMU_VERSION }} (Experimental)" \
+            "" \
+            "This is an experimental release." \
+            "" \
+            "${{ github.event.inputs.changelog }}")
+          ghr_v0.15.0_linux_amd64/ghr -prerelease -t ${{ secrets.GITHUB_TOKEN }} -n "Cemu ${{ env.CEMU_VERSION }} (Experimental)" -b "$RELEASE_BODY" "v${{ env.CEMU_VERSION }}" ./upload
