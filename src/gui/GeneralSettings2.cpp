@@ -162,19 +162,25 @@ wxPanel* GeneralSettings2::AddGeneralPage(wxNotebook* notebook)
 			m_fullscreen_menubar->SetToolTip(_("Displays the menu bar when Cemu is running in fullscreen mode and the mouse cursor is moved to the top"));
 			second_row->Add(m_fullscreen_menubar, 0, botflag, 5);
 
+
 			m_auto_update = new wxCheckBox(box, wxID_ANY, _("Automatically check for updates"));
 			m_auto_update->SetToolTip(_("Automatically checks for new cemu versions on startup"));
 			second_row->Add(m_auto_update, 0, botflag, 5);
+
+			second_row->AddSpacer(10);
+			m_cutting_edge_updates = new wxCheckBox(box, wxID_ANY, _("Update to cutting-edge"));
+			m_cutting_edge_updates->SetToolTip(_("Update to new and untested releases"));
+			second_row->Add(m_cutting_edge_updates, 0, botflag, 5);
 #if BOOST_OS_LINUX 
 			if (!std::getenv("APPIMAGE")) {
 				m_auto_update->Disable();
 			} 
 #endif	
-			second_row->AddSpacer(10);
 			m_save_screenshot = new wxCheckBox(box, wxID_ANY, _("Save screenshot"));
 			m_save_screenshot->SetToolTip(_("Pressing the screenshot key (F12) will save a screenshot directly to the screenshots folder"));
 			second_row->Add(m_save_screenshot, 0, botflag, 5);
 
+			second_row->AddSpacer(10);
 			m_disable_screensaver = new wxCheckBox(box, wxID_ANY, _("Disable screen saver"));
 			m_disable_screensaver->SetToolTip(_("Prevents the system from activating the screen saver or going to sleep while running a game."));
 			second_row->Add(m_disable_screensaver, 0, botflag, 5);
