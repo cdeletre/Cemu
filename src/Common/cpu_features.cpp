@@ -30,6 +30,11 @@ inline void cpuidex(int cpuInfo[4], int functionId, int subFunctionId) {
 
 CPUFeaturesImpl::CPUFeaturesImpl()
 {
+#if defined(__aarch64__)
+#if BOOST_OS_LINUX
+	m_cpuBrandName = "ARM64 CPU";
+#endif
+#endif
 #if defined(ARCH_X86_64)
 	int cpuInfo[4];
 	cpuid(cpuInfo, 0x80000001);
