@@ -1,7 +1,6 @@
-#pragma once
 
 // container for storing a set of register indices
-// specifically optimized towards storing typical range of physical register indices (expected to be below 64)
+// specifically optimized towards storing physical register indices (expected to be below 64)
 class IMLPhysRegisterSet
 {
 public:
@@ -17,19 +16,9 @@ public:
 		m_regBitmask &= ~((uint64)1 << index);
 	}
 
-	void SetAllAvailable()
-	{
-		m_regBitmask = ~0ull;
-	}
-
-	bool HasAllAvailable() const
-	{
-		return m_regBitmask == ~0ull;
-	}
-
 	bool IsAvailable(uint32 index) const
 	{
-		return (m_regBitmask & ((uint64)1 << index)) != 0;
+		return (m_regBitmask & (1 << index)) != 0;
 	}
 
 	IMLPhysRegisterSet& operator&=(const IMLPhysRegisterSet& other)
@@ -44,26 +33,16 @@ public:
 		return *this;
 	}
 
-	void RemoveRegisters(const IMLPhysRegisterSet& other)
-	{
-		this->m_regBitmask &= ~other.m_regBitmask;
-	}
-
 	bool HasAnyAvailable() const
 	{
 		return m_regBitmask != 0;
 	}
 
-	bool HasExactlyOneAvailable() const
-	{
-		return m_regBitmask != 0 && (m_regBitmask & (m_regBitmask - 1)) == 0;
-	}
-
 	// returns index of first available register. Do not call when HasAnyAvailable() == false
-	IMLPhysReg GetFirstAvailableReg()
+	uint32 GetFirstAvailableReg()
 	{
 		cemu_assert_debug(m_regBitmask != 0);
-		sint32 regIndex = 0;
+		uint32 regIndex = 0;
 		auto tmp = m_regBitmask;
 		while ((tmp & 0xFF) == 0)
 		{
@@ -80,7 +59,7 @@ public:
 
 	// returns index of next available register (search includes any register index >= startIndex)
 	// returns -1 if there is no more register
-	IMLPhysReg GetNextAvailableReg(sint32 startIndex) const
+	sint32 GetNextAvailableReg(sint32 startIndex)
 	{
 		if (startIndex >= 64)
 			return -1;
@@ -102,14 +81,10 @@ public:
 		return regIndex;
 	}
 
-	sint32 CountAvailableRegs() const
-	{
-		return std::popcount(m_regBitmask);
-	}
-
 private:
 	uint64 m_regBitmask{ 0 };
 };
+
 
 struct IMLRegisterAllocatorParameters
 {

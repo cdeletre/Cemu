@@ -16,10 +16,10 @@
 #include "IML/IML.h"
 #include "IML/IMLRegisterAllocator.h"
 #include "BackendX64/BackendX64.h"
-#include "util/highresolutiontimer/HighResolutionTimer.h"
 
-#define PPCREC_FORCE_SYNCHRONOUS_COMPILATION	0 // if 1, then function recompilation will block and execute on the thread that called PPCRecompiler_visitAddressNoBlock
-#define PPCREC_LOG_RECOMPILATION_RESULTS		0
+#if defined(__aarch64__)
+#include "BackendAArch64/BackendAArch64.h"
+#endif
 
 struct PPCInvalidationRange
 {
@@ -44,36 +44,14 @@ void ATTR_MS_ABI (*PPCRecompiler_leaveRecompilerCode_unvisited)();
 
 PPCRecompilerInstanceData_t* ppcRecompilerInstanceData;
 
-#if PPCREC_FORCE_SYNCHRONOUS_COMPILATION
-static std::mutex s_singleRecompilationMutex;
+#if defined(__aarch64__)
+std::list<std::unique_ptr<CodeContext>> s_aarch64CodeCtxs;
 #endif
 
 bool ppcRecompilerEnabled = false;
-
-void PPCRecompiler_recompileAtAddress(uint32 address);
-
 // this function does never block and can fail if the recompiler lock cannot be acquired immediately
 void PPCRecompiler_visitAddressNoBlock(uint32 enterAddress)
 {
-#if PPCREC_FORCE_SYNCHRONOUS_COMPILATION
-	if (ppcRecompilerInstanceData->ppcRecompilerDirectJumpTable[enterAddress / 4] != PPCRecompiler_leaveRecompilerCode_unvisited)
-		return;
-	PPCRecompilerState.recompilerSpinlock.lock();
-	if (ppcRecompilerInstanceData->ppcRecompilerDirectJumpTable[enterAddress / 4] != PPCRecompiler_leaveRecompilerCode_unvisited)
-	{
-		PPCRecompilerState.recompilerSpinlock.unlock();
-		return;
-	}
-	ppcRecompilerInstanceData->ppcRecompilerDirectJumpTable[enterAddress / 4] = PPCRecompiler_leaveRecompilerCode_visited;
-	PPCRecompilerState.recompilerSpinlock.unlock();
-	s_singleRecompilationMutex.lock();
-	if (ppcRecompilerInstanceData->ppcRecompilerDirectJumpTable[enterAddress / 4] == PPCRecompiler_leaveRecompilerCode_visited)
-	{
-		PPCRecompiler_recompileAtAddress(enterAddress);
-	}
-	s_singleRecompilationMutex.unlock();
-	return;
-#endif
 	// quick read-only check without lock
 	if (ppcRecompilerInstanceData->ppcRecompilerDirectJumpTable[enterAddress / 4] != PPCRecompiler_leaveRecompilerCode_unvisited)
 		return;
@@ -147,6 +125,7 @@ void PPCRecompiler_attemptEnter(PPCInterpreter_t* hCPU, uint32 enterAddress)
 		return;
 	if (hCPU->remainingCycles <= 0)
 		return;
+
 	auto funcPtr = ppcRecompilerInstanceData->ppcRecompilerDirectJumpTable[enterAddress / 4];
 	if (funcPtr == PPCRecompiler_leaveRecompilerCode_unvisited)
 	{
@@ -168,6 +147,7 @@ PPCRecFunction_t* PPCRecompiler_recompileFunction(PPCFunctionBoundaryTracker::PP
 		cemuLog_log(LogType::Force, "Attempting to recompile function outside of allowed code area");
 		return nullptr;
 	}
+
 	uint32 codeGenRangeStart;
 	uint32 codeGenRangeSize = 0;
 	coreinit::OSGetCodegenVirtAddrRangeInternal(codeGenRangeStart, codeGenRangeSize);
@@ -186,14 +166,8 @@ PPCRecFunction_t* PPCRecompiler_recompileFunction(PPCFunctionBoundaryTracker::PP
 	ppcRecFunc->ppcAddress = range.startAddress;
 	ppcRecFunc->ppcSize = range.length;
 
-#if PPCREC_LOG_RECOMPILATION_RESULTS
-	BenchmarkTimer bt;
-	bt.Start();
-#endif
-
 	// generate intermediate code
 	ppcImlGenContext_t ppcImlGenContext = { 0 };
-	ppcImlGenContext.debug_entryPPCAddress = range.startAddress;
 	bool compiledSuccessfully = PPCRecompiler_generateIntermediateCode(ppcImlGenContext, ppcRecFunc, entryAddresses, boundaryTracker);
 	if (compiledSuccessfully == false)
 	{
@@ -220,21 +194,53 @@ PPCRecFunction_t* PPCRecompiler_recompileFunction(PPCFunctionBoundaryTracker::PP
 		return nullptr;
 	}
 
+	//if (ppcRecFunc->ppcAddress == 0x30DF5F8)
+	//{
+	//	debug_printf("----------------------------------------\n");
+	//	IMLDebug_Dump(&ppcImlGenContext);
+	//	__debugbreak();
+	//}
+
+
+	//if (ppcRecFunc->ppcAddress == 0x11223344)
+	//{
+	//	//debug_printf("----------------------------------------\n");
+	//	//IMLDebug_Dump(&ppcImlGenContext);
+	//	//__debugbreak();
+	//}
+	//else
+	//{
+	//	delete ppcRecFunc;
+	//	return nullptr;
+	//}
+
+	//if (ppcRecFunc->ppcAddress == 0x03C26844)
+	//{
+	//	__debugbreak();
+	//	IMLDebug_Dump(&ppcImlGenContext);
+	//	__debugbreak();
+	//}
+	// 31A8778
+
+	// Functions for testing (botw):
+	// 3B4049C (large with switch case)
+	// 30BF118 (has a bndz copy loop + some float instructions at the end)
+
+#if defined(ARCH_X86_64)
 	// emit x64 code
 	bool x64GenerationSuccess = PPCRecompiler_generateX64Code(ppcRecFunc, &ppcImlGenContext);
 	if (x64GenerationSuccess == false)
 	{
 		return nullptr;
 	}
-	if (ActiveSettings::DumpRecompilerFunctionsEnabled())
+#elif defined(__aarch64__)
+	auto aarch64CodeCtx = PPCRecompiler_generateAArch64Code(ppcRecFunc, &ppcImlGenContext);
+	if (aarch64CodeCtx == nullptr)
 	{
-		FileStream* fs = FileStream::createFile2(ActiveSettings::GetUserDataPath(fmt::format("dump/recompiler/ppc_{:08x}.bin", ppcRecFunc->ppcAddress)));
-		if (fs)
-		{
-			fs->writeData(ppcRecFunc->x86Code, ppcRecFunc->x86Size);
-			delete fs;
-		}
+		return nullptr;
 	}
+	s_aarch64CodeCtxs.push_back(std::move(aarch64CodeCtx));
+#endif
 
 	// collect list of PPC-->x64 entry points
 	entryPointsOut.clear();
@@ -249,17 +255,6 @@ PPCRecFunction_t* PPCRecompiler_recompileFunction(PPCFunctionBoundaryTracker::PP
 		entryPointsOut.emplace_back(ppcEnterOffset, x64Offset);
 	}
 
-#if PPCREC_LOG_RECOMPILATION_RESULTS
-	bt.Stop();
-	uint32 codeHash = 0;
-	for (uint32 i = 0; i < ppcRecFunc->x86Size; i++)
-	{
-		codeHash = _rotr(codeHash, 3);
-		codeHash += ((uint8*)ppcRecFunc->x86Code)[i];
-	}
-	cemuLog_log(LogType::Force, "[Recompiler] PPC 0x{:08x} -> x64: 0x{:x} Took {:.4}ms | Size {:04x} CodeHash {:08x}", (uint32)ppcRecFunc->ppcAddress, (uint64)(uintptr_t)ppcRecFunc->x86Code, bt.GetElapsedMilliseconds(), ppcRecFunc->x86Size, codeHash);
-#endif
-
 	return ppcRecFunc;
 }
 
@@ -269,7 +264,7 @@ void PPCRecompiler_NativeRegisterAllocatorPass(ppcImlGenContext_t& ppcImlGenCont
 
 	for (auto& it : ppcImlGenContext.mappedRegs)
 		raParam.regIdToName.try_emplace(it.second.GetRegID(), it.first);
-
+#if defined(ARCH_X86_64)
 	auto& gprPhysPool = raParam.GetPhysRegPool(IMLRegFormat::I64);
 	gprPhysPool.SetAvailable(IMLArchX86::PHYSREG_GPR_BASE + X86_REG_RAX);
 	gprPhysPool.SetAvailable(IMLArchX86::PHYSREG_GPR_BASE + X86_REG_RDX);
@@ -301,6 +296,15 @@ void PPCRecompiler_NativeRegisterAllocatorPass(ppcImlGenContext_t& ppcImlGenCont
 	fprPhysPool.SetAvailable(IMLArchX86::PHYSREG_FPR_BASE + 12);
 	fprPhysPool.SetAvailable(IMLArchX86::PHYSREG_FPR_BASE + 13);
 	fprPhysPool.SetAvailable(IMLArchX86::PHYSREG_FPR_BASE + 14);
+#elif defined(__aarch64__)
+	auto& gprPhysPool = raParam.GetPhysRegPool(IMLRegFormat::I64);
+	for (int i = IMLArchAArch64::PHYSREG_GPR_BASE; i < IMLArchAArch64::PHYSREG_GPR_BASE + IMLArchAArch64::PHYSREG_GPR_COUNT; i++)
+		gprPhysPool.SetAvailable(i);
+
+	auto& fprPhysPool = raParam.GetPhysRegPool(IMLRegFormat::F64);
+	for (int i = IMLArchAArch64::PHYSREG_FPR_BASE; i < IMLArchAArch64::PHYSREG_FPR_BASE + IMLArchAArch64::PHYSREG_FPR_COUNT; i++)
+		fprPhysPool.SetAvailable(i);
+#endif
 
 	IMLRegisterAllocator_AllocateRegisters(&ppcImlGenContext, raParam);
 }
@@ -319,9 +323,10 @@ bool PPCRecompiler_ApplyIMLPasses(ppcImlGenContext_t& ppcImlGenContext)
 	// delay byte swapping for certain load+store patterns
 	IMLOptimizer_OptimizeDirectIntegerCopies(&ppcImlGenContext);
 
-	IMLOptimizer_StandardOptimizationPass(ppcImlGenContext);
-
 	PPCRecompiler_NativeRegisterAllocatorPass(ppcImlGenContext);
+
+	//PPCRecompiler_reorderConditionModifyInstructions(&ppcImlGenContext);
+	//PPCRecompiler_removeRedundantCRUpdates(&ppcImlGenContext);
 
 	return true;
 }
@@ -432,10 +437,6 @@ std::atomic_bool s_recompilerThreadStopSignal{false};
 void PPCRecompiler_thread()
 {
 	SetThreadName("PPCRecompiler");
-#if PPCREC_FORCE_SYNCHRONOUS_COMPILATION
-	return;
-#endif
-
 	while (true)
 	{
         if(s_recompilerThreadStopSignal)
@@ -489,7 +490,6 @@ void PPCRecompiler_reserveLookupTableBlock(uint32 offset)
 	if (ppcRecompiler_reservedBlockMask[blockIndex])
 		return;
 	ppcRecompiler_reservedBlockMask[blockIndex] = true;
-
 	void* p1 = MemMapper::AllocateMemory(&(ppcRecompilerInstanceData->ppcRecompilerFuncTable[offset/4]), (PPC_REC_ALLOC_BLOCK_SIZE/4)*sizeof(void*), MemMapper::PAGE_PERMISSION::P_RW, true);
 	void* p3 = MemMapper::AllocateMemory(&(ppcRecompilerInstanceData->ppcRecompilerDirectJumpTable[offset/4]), (PPC_REC_ALLOC_BLOCK_SIZE/4)*sizeof(void*), MemMapper::PAGE_PERMISSION::P_RW, true);
 	if( !p1 || !p3 )
@@ -682,8 +682,11 @@ void PPCRecompiler_init()
 	debug_printf("Allocating %dMB for recompiler instance data...\n", (sint32)(sizeof(PPCRecompilerInstanceData_t) / 1024 / 1024));
 	ppcRecompilerInstanceData = (PPCRecompilerInstanceData_t*)MemMapper::ReserveMemory(nullptr, sizeof(PPCRecompilerInstanceData_t), MemMapper::PAGE_PERMISSION::P_RW);
 	MemMapper::AllocateMemory(&(ppcRecompilerInstanceData->_x64XMM_xorNegateMaskBottom), sizeof(PPCRecompilerInstanceData_t) - offsetof(PPCRecompilerInstanceData_t, _x64XMM_xorNegateMaskBottom), MemMapper::PAGE_PERMISSION::P_RW, true);
+#if defined(ARCH_X86_64)
 	PPCRecompilerX64Gen_generateRecompilerInterfaceFunctions();
-
+#else
+	PPCRecompilerAArch64Gen_generateRecompilerInterfaceFunctions();
+#endif
     PPCRecompiler_allocateRange(0, 0x1000); // the first entry is used for fallback to interpreter
     PPCRecompiler_allocateRange(mmuRange_TRAMPOLINE_AREA.getBase(), mmuRange_TRAMPOLINE_AREA.getSize());
     PPCRecompiler_allocateRange(mmuRange_CODECAVE.getBase(), mmuRange_CODECAVE.getSize());
@@ -763,4 +766,7 @@ void PPCRecompiler_Shutdown()
         // mark as unmapped
         ppcRecompiler_reservedBlockMask[i] = false;
     }
+#if defined(__aarch64__)
+	s_aarch64CodeCtxs.clear();
+#endif
 }
