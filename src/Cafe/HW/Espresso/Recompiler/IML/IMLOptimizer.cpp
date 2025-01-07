@@ -52,15 +52,15 @@ void PPCRecompiler_optimizeDirectFloatCopiesScanForward(ppcImlGenContext_t* ppcI
 
 		// check if FPR is overwritten (we can actually ignore read operations?)
 		imlInstruction->CheckRegisterUsage(&registersUsed);
-		if (registersUsed.writtenFPR1.IsValidAndSameRegID(fprIndex))
+		if (registersUsed.fpr.writtenFPR1.IsValidAndSameRegID(fprIndex))
 			break;
-		if (registersUsed.readFPR1.IsValidAndSameRegID(fprIndex))
+		if (registersUsed.fpr.readFPR1.IsValidAndSameRegID(fprIndex))
 			break;
-		if (registersUsed.readFPR2.IsValidAndSameRegID(fprIndex))
+		if (registersUsed.fpr.readFPR2.IsValidAndSameRegID(fprIndex))
 			break;
-		if (registersUsed.readFPR3.IsValidAndSameRegID(fprIndex))
+		if (registersUsed.fpr.readFPR3.IsValidAndSameRegID(fprIndex))
 			break;
-		if (registersUsed.readFPR4.IsValidAndSameRegID(fprIndex))
+		if (registersUsed.fpr.readFPR4.IsValidAndSameRegID(fprIndex))
 			break;
 	}
 
@@ -142,9 +142,9 @@ void PPCRecompiler_optimizeDirectIntegerCopiesScanForward(ppcImlGenContext_t* pp
 		}
 		// check if GPR is accessed
 		imlInstruction->CheckRegisterUsage(&registersUsed);
-		if (registersUsed.readGPR1.IsValidAndSameRegID(gprIndex) ||
-			registersUsed.readGPR2.IsValidAndSameRegID(gprIndex) ||
-			registersUsed.readGPR3.IsValidAndSameRegID(gprIndex))
+		if (registersUsed.gpr.readGPR1.IsValidAndSameRegID(gprIndex) ||
+			registersUsed.gpr.readGPR2.IsValidAndSameRegID(gprIndex) ||
+			registersUsed.gpr.readGPR3.IsValidAndSameRegID(gprIndex))
 		{
 			break;
 		}
