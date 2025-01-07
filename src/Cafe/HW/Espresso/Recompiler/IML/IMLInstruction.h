@@ -325,38 +325,32 @@ struct IMLUsedRegisters
 	IMLUsedRegisters() {};
 
 	// GPR
-	union
+	struct GPR
 	{
-		struct
-		{
-			IMLReg readGPR1;
-			IMLReg readGPR2;
-			IMLReg readGPR3;
-			IMLReg writtenGPR1;
-			IMLReg writtenGPR2;
-		};
-	};
+        IMLReg readGPR1;
+        IMLReg readGPR2;
+        IMLReg readGPR3;
+        IMLReg writtenGPR1;
+        IMLReg writtenGPR2;
+    } gpr;
+
 	// FPR
-	union
-	{
-		struct
-		{
-			// note: If destination operand is not fully written (PS0 and PS1) it will be added to the read registers
-			IMLReg readFPR1;
-			IMLReg readFPR2;
-			IMLReg readFPR3;
-			IMLReg readFPR4;
-			IMLReg writtenFPR1;
-		};
-	};
+	struct FPR
+    {
+        IMLReg readFPR1;
+        IMLReg readFPR2;
+        IMLReg readFPR3;
+        IMLReg readFPR4;
+        IMLReg writtenFPR1;
+    } fpr;
 
 	bool IsBaseGPRWritten(IMLReg imlReg) const
 	{
 		cemu_assert_debug(imlReg.IsValid());
 		auto regId = imlReg.GetRegID();
-		if (writtenGPR1.IsValid() && writtenGPR1.GetRegID() == regId)
+		if (gpr.writtenGPR1.IsValid() && gpr.writtenGPR1.GetRegID() == regId)
 			return true;
-		if (writtenGPR2.IsValid() && writtenGPR2.GetRegID() == regId)
+		if (gpr.writtenGPR2.IsValid() && gpr.writtenGPR2.GetRegID() == regId)
 			return true;
 		return false;
 	}
@@ -364,48 +358,48 @@ struct IMLUsedRegisters
 	template<typename Fn>
 	void ForEachWrittenGPR(Fn F) const
 	{
-		if (writtenGPR1.IsValid())
-			F(writtenGPR1);
-		if (writtenGPR2.IsValid())
-			F(writtenGPR2);
+		if (gpr.writtenGPR1.IsValid())
+			F(gpr.writtenGPR1);
+		if (gpr.writtenGPR2.IsValid())
+			F(gpr.writtenGPR2);
 	}
 
 	template<typename Fn>
 	void ForEachReadGPR(Fn F) const
 	{
-		if (readGPR1.IsValid())
-			F(readGPR1);
-		if (readGPR2.IsValid())
-			F(readGPR2);
-		if (readGPR3.IsValid())
-			F(readGPR3);
+		if (gpr.readGPR1.IsValid())
+			F(gpr.readGPR1);
+		if (gpr.readGPR2.IsValid())
+			F(gpr.readGPR2);
+		if (gpr.readGPR3.IsValid())
+			F(gpr.readGPR3);
 	}
 
 	template<typename Fn>
 	void ForEachAccessedGPR(Fn F) const
 	{
 		// GPRs
-		if (readGPR1.IsValid())
-			F(readGPR1, false);
-		if (readGPR2.IsValid())
-			F(readGPR2, false);
-		if (readGPR3.IsValid())
-			F(readGPR3, false);
-		if (writtenGPR1.IsValid())
-			F(writtenGPR1, true);
-		if (writtenGPR2.IsValid())
-			F(writtenGPR2, true);
+		if (gpr.readGPR1.IsValid())
+			F(gpr.readGPR1, false);
+		if (gpr.readGPR2.IsValid())
+			F(gpr.readGPR2, false);
+		if (gpr.readGPR3.IsValid())
+			F(gpr.readGPR3, false);
+		if (gpr.writtenGPR1.IsValid())
+			F(gpr.writtenGPR1, true);
+		if (gpr.writtenGPR2.IsValid())
+			F(gpr.writtenGPR2, true);
 		// FPRs
-		if (readFPR1.IsValid())
-			F(readFPR1, false);
-		if (readFPR2.IsValid())
-			F(readFPR2, false);
-		if (readFPR3.IsValid())
-			F(readFPR3, false);
-		if (readFPR4.IsValid())
-			F(readFPR4, false);
-		if (writtenFPR1.IsValid())
-			F(writtenFPR1, true);
+		if (fpr.readFPR1.IsValid())
+			F(fpr.readFPR1, false);
+		if (fpr.readFPR2.IsValid())
+			F(fpr.readFPR2, false);
+		if (fpr.readFPR3.IsValid())
+			F(fpr.readFPR3, false);
+		if (fpr.readFPR4.IsValid())
+			F(fpr.readFPR4, false);
+		if (fpr.writtenFPR1.IsValid())
+			F(fpr.writtenFPR1, true);
 	}
 
 };
