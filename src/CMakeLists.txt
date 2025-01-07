@@ -7,7 +7,7 @@ endif()
 
 option(CEMU_ASM_FLAGS "Additional ASM flags used for compiling Cemu source code")
 if(CEMU_ASM_FLAGS)
-	set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} ${CEMU_ASM_FLAGS}")
+	string(REPLACE ";" " " CMAKE_ASM_FLAGS ${CEMU_ASM_FLAGS})
 endif()
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
